@@ -9,4 +9,5 @@ RUN npm install -g pm2
 COPY . .
 ENV NODE_ENV=production
 EXPOSE 4000
-CMD ["pm2-runtime", "ecosystem.config.js"]
+RUN chmod +x /app/docker-entrypoint-migrate-prisma.sh
+CMD ["/app/docker-entrypoint.sh"]

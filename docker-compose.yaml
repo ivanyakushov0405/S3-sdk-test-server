@@ -72,11 +72,15 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: grafana-container
+    ports:
+      - "127.0.0.1:3000:3000"
+      #- "3000:3000" #для dev
     environment:
       - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER}
       - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
     depends_on:
       - loki
     networks:
