@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+.git
+.gitignore
+logs
+*.log
+.vscode
+.idea
+prisma/migrations
+README.md

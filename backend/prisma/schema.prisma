@@ -1,0 +1,25 @@
+generator client {
+  provider     = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum FileStatus {
+    pending
+    ready
+}
+model File {
+    id          String @id @default(cuid())
+    storageKey  String @unique
+    filename    String
+    mimetype    String
+    sizeBytes   Int
+    status      FileStatus
+    deletedAt   DateTime?
+    createdAt   DateTime @default(now())
+
+
+}
