@@ -10,3 +10,4 @@ logs
 .idea
 prisma/migrations
 README.md
+info.md

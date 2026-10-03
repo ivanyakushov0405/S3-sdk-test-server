@@ -8,3 +8,5 @@ logs
 .env.*
 .vscode
 .idea
+info.md
+README.md

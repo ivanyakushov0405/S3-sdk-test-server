@@ -6,4 +6,4 @@ build/
 .idea/
 .vscode/
 *.log
-README.md
+info.md
