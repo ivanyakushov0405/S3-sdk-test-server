@@ -10,4 +10,4 @@ COPY . .
 ENV NODE_ENV=production
 EXPOSE 4000
 RUN chmod +x /app/docker-entrypoint-migrate-prisma.sh
-CMD ["/app/docker-entrypoint.sh"]
+CMD ["/app/docker-entrypoint-migrate-prisma.sh"]

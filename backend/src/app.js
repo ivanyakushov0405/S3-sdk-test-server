@@ -15,7 +15,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-app.set('trust proxy', true);
+app.set('trust proxy', true)
 app.use(requestIp.mw());
 app.use(requestLogger);
 app.use('/api/s3', s3Route);
