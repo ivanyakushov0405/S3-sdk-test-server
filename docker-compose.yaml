@@ -111,3 +111,4 @@ networks:
 volumes:
   grafana-data:
   redis-data:
+  loki-data:

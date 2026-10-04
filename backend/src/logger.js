@@ -74,7 +74,11 @@ const safeStringify = (obj) => {
 function formatS3Log(level, args) {
     // Если пришёл один объект с полезными полями — разворачиваем его на верхний уровень
     const detail = args.length === 1 && typeof args[0] === 'object' ? args[0] : { raw: args };
-    
+    const isExpectedNotFound =
+        detail.commandName === 'HeadObjectCommand' &&
+        (detail.error?.name === 'NotFound' || detail.metadata?.httpStatusCode === 404);
+
+    const actualLevel = isExpectedNotFound ? 'debug' : level;
     const meta = {
         clientName: detail.clientName,
         input: detail.input ? JSON.parse(safeStringify(detail.input)) : undefined,
@@ -88,7 +92,7 @@ function formatS3Log(level, args) {
     const errStr = detail.error?.message ? `\n${detail.error?.message}` : '';
     const parts = [`[S3 SDK] ${detail.commandName}`, metaStr.trim(), errStr.trim()].filter(Boolean);
 
-    s3ClientLogger[level](parts.join(' '), {
+    s3ClientLogger[actualLevel](parts.join(' '), {
         ...meta,
         commandName: detail.commandName,
         errorMessage: detail.error?.message,
