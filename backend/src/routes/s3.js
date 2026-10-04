@@ -17,12 +17,15 @@ const upload = multer({
 router.post('/upload', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Файл не передан' });
     try {
+        const nameFile = req.query.name;
+        if (!nameFile || nameFile.length > 16) return res.status(404).json({ error: 'Incorrect name' });
         const key = getStorageKey('uploads', req.file.originalname);
         await uploadS3File(req.file.buffer, key, req.file.mimetype);
         await prisma.file.create({
             data: {
                 storageKey: key,
                 filename: req.file.originalname,
+                name: nameFile,
                 mimetype: req.file.mimetype,
                 sizeBytes: req.file.size,
                 status: 'ready',
@@ -36,8 +39,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 });
 
 
-async function busboyFileMulti(req, res, key, fileStream, mimeType, filename, sendResponse) {
-    let upload;
+async function busboyFileMulti(req, res, key, fileStream, mimeType, filename, name, sendResponse) {
+    let upload, uploadedBytes;
     try {
         upload = uploadMultipartS3File(key, fileStream, mimeType);
         upload.on('httpUploadProgress', (progress) => {
@@ -54,6 +57,7 @@ async function busboyFileMulti(req, res, key, fileStream, mimeType, filename, se
             data: {
                 storageKey: key,
                 filename,
+                name,
                 mimetype: mimeType,
                 sizeBytes: uploadedBytes,
                 status: 'ready',
@@ -75,7 +79,7 @@ async function busboyFileMulti(req, res, key, fileStream, mimeType, filename, se
         sendResponse(500, { error: 'Не удалось загрузить файл' });
     }
 }
-async function busboyFileBuff(req, res, key, fileStream, mimeType, filename, sendResponse, start) {
+async function busboyFileBuff(req, res, key, fileStream, mimeType, filename, name, sendResponse, start) {
     try {
         const chunks = [];
         for await (const chunk of fileStream) {
@@ -100,6 +104,7 @@ async function busboyFileBuff(req, res, key, fileStream, mimeType, filename, sen
             data: {
                 storageKey: key,
                 filename,
+                name,
                 mimetype: mimeType,
                 sizeBytes: buffer.length,
                 status: 'ready',
@@ -116,6 +121,8 @@ async function busboyFileBuff(req, res, key, fileStream, mimeType, filename, sen
 router.post('/stream-upload', (req, res) => {
     const MAX_SIZE = parseInt(process.env.UPLOAD_MULTIPART_LIMIT_MB) * 1024 * 1024;
     const contentLength = parseInt(req.headers['content-length'], 10);
+    const nameFile = req.query.name;
+    if (!nameFile || nameFile.length > 16) return res.status(404).json({ error: 'Incorrect name' });
 
     if (contentLength && contentLength > MAX_SIZE) {
         return res.status(413).json({ error: `Файл превышает лимит ${process.env.UPLOAD_MULTIPART_LIMIT_MB} МБ` });
@@ -157,7 +164,7 @@ router.post('/stream-upload', (req, res) => {
         fileStream.on('close', () => {
             req.logger.debug('fileStream CLOSE событие');
         });
-        await busboyFileMulti(req, res, key, fileStream, mimeType, filename, sendResponse)
+        await busboyFileMulti(req, res, key, fileStream, mimeType, filename, nameFile, sendResponse)
         
     });
 
@@ -174,7 +181,8 @@ router.post('/stream-upload', (req, res) => {
 });
 
 router.get('/presigned-upload-url', async (req, res) => {
-    const { filename, type, size } = req.query;
+    const { filename, name, type, size } = req.query;
+    if (!name || name.length > 16) return res.status(404).json({ error: 'Incorrect name' });
     const MAX_SIZE = parseInt(process.env.UPLOAD_URL_LIMIT_MB) * 1024 * 1024;
 
     if (!filename || !type) {
@@ -190,6 +198,7 @@ router.get('/presigned-upload-url', async (req, res) => {
             data: {
                 storageKey: key,
                 filename,
+                name,
                 mimetype: type,
                 sizeBytes: parseInt(size, 10) || 0,
                 status: 'pending',

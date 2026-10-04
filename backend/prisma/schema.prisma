@@ -15,6 +15,7 @@ model File {
     id          String @id @default(cuid())
     storageKey  String @unique
     filename    String
+    name        String @db.VarChar(16)
     mimetype    String
     sizeBytes   Int
     status      FileStatus

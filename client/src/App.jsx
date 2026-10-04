@@ -1,4 +1,4 @@
-import React, { use } from "react";
+import React, { useRef } from "react";
 import { useState, useEffect } from "react";
 
 import "./App.css"
@@ -6,10 +6,13 @@ import "./App.css"
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 export default function App({}) {
-    const [storageKey, setStorageKey] = useState(null);
     const [myImages, setImages] = useState([]);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [url, setUrl] = useState(null);
+    const [name, setName] = useState('');
+
+    const [isSearch, setIsSearch] = useState(true);
+    const [searchName, setSearchName] = useState('');
 
     function getPublicUrl(key) {
         if (!key) return;
@@ -17,8 +20,10 @@ export default function App({}) {
     }
 
     useEffect(() => {
+        if (isSearch) return;
         async function getKeys() {
-            const res = await fetch(API_URL + '/files/allkeys', { method: 'GET' });
+            setImages([]);
+            const res = await fetch(API_URL + `/files/allkeys`, { method: 'GET' });
             const data = await res.json();
             if (data.success) {
                 setImages((prev) => [...prev, ...data.keys]);
@@ -27,25 +32,27 @@ export default function App({}) {
             }
         }
         getKeys();
-    }, []);
+
+    }, [isSearch]);
 
     async function uploadViaBuffer(file) {
-        if (!file) return;
+        if (!file || !name) return;
         const formData = new FormData();
         formData.append('file', file);
         try {
-            const res = await fetch(API_URL + '/s3/upload', {
+            const query = new URLSearchParams({ name });
+            const res = await fetch(API_URL + `/s3/upload?${query.toString()}`, {
                 method: 'POST',
                 body: formData,
             });
             const resJson = await res.json();
-            setStorageKey(resJson.key);
-            setUrl(url)
-            setImages((prev) => [...prev, {
+            
+            setImages((prev) => [{
                 filename: file.name,
+                name: name,
                 createdAt: Date.now(),
                 storageKey: resJson.key
-            }]);
+            }, ...prev]);
         } catch (err) {
             console.error('Ошибка загрузки файла:', err);
         }
@@ -57,7 +64,8 @@ export default function App({}) {
             formData.append('file', file);
 
             const xhr = new XMLHttpRequest();
-            xhr.open('POST', API_URL + '/s3/stream-upload');
+            const query = new URLSearchParams({ name });
+            xhr.open('POST', API_URL + `/s3/stream-upload?${query.toString()}`);
 
             xhr.upload.onprogress = (e) => {
                 if (e.lengthComputable) {
@@ -66,10 +74,15 @@ export default function App({}) {
             };
 
             xhr.onload = () => {
+                let res = null;
+                try {
+                    res = JSON.parse(xhr.responseText);
+                } catch { }
                 if (xhr.status >= 200 && xhr.status < 300) {
-                    resolve(JSON.parse(xhr.responseText));
+                    if (res) resolve(res);
+                    else reject(new Error('Сервер вернул некорректный ответ'));
                 } else {
-                    reject(new Error('Ошибка загрузки: ' + xhr.status));
+                    reject(new Error('Ошибка загрузки: ' + (res?.error || `HTTP ${xhr.status}`)));
                 }
             };
             xhr.onerror = () => reject(new Error('Сетевая ошибка'));
@@ -78,17 +91,16 @@ export default function App({}) {
         });
     }
     async function uploadViaStream(file) {
-        if (!file) return;
+        if (!file || !name) return;
         setUploadProgress(0);
         try {
             const result = await uploadWithProgress(file, setUploadProgress); // ждём, пока Promise выполнится (resolve)
-            console.log('Успех:', result.key);
-            setImages((prev) => [...prev, {
+            setImages((prev) => [{
                 filename: file.name,
+                name,
                 createdAt: Date.now(),
                 storageKey: result.key
-            }]);
-            setStorageKey(result.key);
+            }, ...prev]);
         } catch (err) {
             console.log('Ошибка:', err.message); // сюда попадём, если был reject
         } finally {
@@ -96,8 +108,7 @@ export default function App({}) {
         }
     }
     async function uploadDirectToS3(file) {
-        if (!file) return;
-        const query = new URLSearchParams({filename: file.name, type: file.type, size: file.size});
+        const query = new URLSearchParams({filename: file.name, name: name, type: file.type, size: file.size});
         const res = await fetch(`${API_URL}/s3/presigned-upload-url?${query.toString()}`);
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -116,7 +127,6 @@ export default function App({}) {
             throw new Error('Не удалось загрузить файл в хранилище');
         }
         setUrl(url)
-        setStorageKey(key);
         // 3. Сообщаем своему серверу, что файл загружен
         const confirmQuery = new URLSearchParams({ key, filename: file.name });
         const confirmRes = await fetch(`${API_URL}/s3/confirm-upload?${confirmQuery.toString()}`, {
@@ -128,26 +138,65 @@ export default function App({}) {
             throw new Error('Не удалось подтвердить загрузку');
         }
         const confirmResj = await confirmRes.json();
-        setImages((prev) => [...prev, {
-                filename: file.name,
-                createdAt: Date.now(),
-                storageKey: confirmResj.storageKey
-        }]);
         return confirmResj;
         
     }
     async function uploadViaUrl(file) {
+        if (!file || !name) return;
         try {
             const result = await uploadDirectToS3(file);
-            console.log('Успех:', result);
+            setImages((prev) => [{
+                filename: file.name,
+                name,
+                createdAt: Date.now(),
+                storageKey: result.storageKey
+            }, ...prev]);
         } catch (err) {
             console.error('Ошибка:', err.message); // сюда прилетит наш throw
         }
+    }
+    async function deleteFile(key) {
+        if (!confirm('Удалить файл?')) return;
+        const paramKey = key.split('/')[1]
+        const res = await fetch(API_URL + `/files/key/${paramKey}`, {
+            method: 'DELETE'
+        });
+        const resJson = await res.json();
+        if (resJson.success) {
+            setImages((prev) => prev.filter((img) => img.storageKey !== key));
+        } else {
+            console.error('Ошибка удаления:', resJson.error);
+        }
+
+    }
+    async function renameFile(key) {
+        const name = prompt('Новое имя файла (до 16 символов)')?.trim();
+        if (!name) return; // отмена или без изменений
+        if (name.length > 16) {
+            alert('Имя не должно быть длиннее 16 символов');
+            return;
+        }
+        const paramKey = key.split('/')[1];
+        const res = await fetch(API_URL + `/files/key/${paramKey}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+        });
+        const resJson = await res.json();
+        if (resJson.success) {
+            setImages((prev) => prev.map((img) => (img.storageKey === key ? { ...img, name } : img)));
+        } else {
+            console.error('Ошибка переименования:', resJson.error);
+        }
+    }
+    async function eSearch(name) {
+        
     }
 
     return (
         <div className="main">
             <p>S3 Bucket: <a href="https://timeweb.cloud/my/storage/562591/dashboard" target="_blank">3e88f5e3-35cc-4a02-9d3c-95cfbb3707c0</a></p>
+            <input className={'inputName'} value={name} placeholder={'Enter file name'} onChange={(e) => setName(e.target.value)}/>
             <label>
                 Upload Image via server's buffer
                 <input type="file" accept="image/*" onChange={(e) => uploadViaBuffer(e.target.files[0])}/>
@@ -167,17 +216,46 @@ export default function App({}) {
                 <input type="file" accept="image/*" onChange={(e) => uploadViaUrl(e.target.files[0])}/>
                 <p>{url && `Url: ${url}`}</p>
             </label>
-            <div>
-                <p>Загруженные картинки:</p>
-                <ul>
-                    {myImages.map((img) => (
-                        <li key={img.storageKey}>
-                            <p>{img.filename}</p>
-                            <p>{new Date(img.createdAt).toLocaleDateString('ru-RU')}</p>
-                            <img src={getPublicUrl(img.storageKey)} alt={img.name} />
-                        </li>
-                    ))}
-                </ul>
+            <div className="filesBlock">
+                <span>
+                    <input
+                        type="checkbox"
+                        checked={isSearch}
+                        onChange={(e) => setIsSearch(e.target.checked)}
+                    />
+                    Найти в поиске
+                </span>
+                
+                { isSearch ? (
+                    <div>
+                        <p>Поиск:</p>
+                        <input className={'inputName'} value={searchName} placeholder={'Search'} onChange={(e) => setSearchName(e.target.value)}/>
+                        <button onClick={() => eSearch(searchName)}>Search</button>
+                    </div>
+                ) : (
+                    <div>
+                        <p>Загруженные картинки:</p>
+                            <ul>
+                                {myImages.map((img) => (
+                                    <li key={img.storageKey}>
+                                        <p>{img.name} | {img.filename}</p>
+                                        <p>{new Date(img.createdAt).toLocaleString('ru-RU', {
+                                            dateStyle: 'short',
+                                            timeStyle: 'short',
+                                        })}</p>
+                                        <div className="frame">
+                                            <img className="frame-bg" src={getPublicUrl(img.storageKey)} alt="" aria-hidden="true" />
+                                            <img className="frame-img" src={getPublicUrl(img.storageKey)} alt={img.name} />
+                                        </div>
+                                        <div>
+                                            <button onClick={() => renameFile(img.storageKey)}>Rename</button>
+                                            <button onClick={() => deleteFile(img.storageKey)}>Delete</button>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                    </div>
+                )}
             </div>
         </div>
     );
